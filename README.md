@@ -8,6 +8,8 @@ Static publication page for **PACMAN**, a self-hosted manager for a live `proxy.
 This repository is the published artefact only. The product itself is maintained in a private
 repository.
 
+**Live:** https://odigiedavididemudia.github.io/pacman-publication/
+
 ## Contents
 
 - `index.html` — the entire publication: HTML, CSS, and the theme toggle in one file.
