@@ -1,0 +1,2049 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PACMAN — Publication: a safe control plane for proxy.pac</title>
+<meta name="description" content="Technical publication for PACMAN: a self-hosted manager for a live proxy.pac. Marker-scoped rules, a behavioural safety guard, atomic writes, versioned rollback, PAC analysis, and honest limits.">
+<meta name="author" content="David Idemudia Odige">
+<meta property="og:title" content="PACMAN — Publication">
+<meta property="og:description" content="How to change routing policy on a live PAC file without breaking every browser in the building: markers, guards, snapshots, and an analyzer for hand-written PACs.">
+<meta property="og:type" content="article">
+<meta name="theme-color" content="#F26522">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='8' fill='%23F26522'/%3E%3Cpath d='M28 32 L44.9 17.9 A22 22 0 1 0 44.9 46.1 Z' fill='%23141414'/%3E%3C/svg%3E" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem('pacman-publication-theme');
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute('data-theme', saved || (prefersDark ? 'dark' : 'light'));
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'light');
+  }
+})();
+</script>
+<style>
+/* ============================================================
+   PACMAN publication
+   Neobrutalism structure with minimalist restraint:
+   hard rules and two earned shadows, GTCO orange used as a rationed accent.
+   ============================================================ */
+
+:root {
+  color-scheme: light;
+
+  --bg: #F7F7F5;
+  --panel: #FFFFFF;
+  --panel-alt: #EFEFEC;
+  --ink: #141414;
+  --muted: #4B5563;
+  --faint: #6B7280;
+  --line: #141414;
+  --line-soft: #D5D5D0;
+
+  --accent: #F26522;
+  --accent-ink: #B23F0C;
+  --accent-soft: #FDEDE4;
+
+  --ok: #15803D;
+  --ok-soft: #E7F6EC;
+  --fail: #B91C1C;
+  --fail-soft: #FDEAEA;
+  --warn: #B45309;
+  --warn-soft: #FDF3E3;
+
+  --code-bg: #171717;
+  --code-ink: #F7F3EA;
+
+  --shadow-sm: 2px 2px 0 var(--ink);
+  --shadow: 4px 4px 0 var(--ink);
+  --shadow-lg: 6px 6px 0 var(--ink);
+  --radius: 4px;
+
+  --fh: "Space Grotesk", "Inter", sans-serif;
+  --fb: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --fm: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --max: 1180px;
+  --gutter: clamp(20px, 5vw, 48px);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #141414;
+  --panel: #1F1F1F;
+  --panel-alt: #262626;
+  --ink: #F4F1EA;
+  --muted: #C4C4C4;
+  --faint: #A3A3A3;
+  --line: #F4F1EA;
+  --line-soft: #3A3A3A;
+
+  --accent: #FF8A4D;
+  --accent-ink: #FFB27A;
+  --accent-soft: #33200F;
+
+  --ok: #4ADE80;
+  --ok-soft: #10261A;
+  --fail: #F87171;
+  --fail-soft: #2A1414;
+  --warn: #FBBF24;
+  --warn-soft: #2E2410;
+
+  --code-bg: #0E0E0E;
+  --code-ink: #F4F1EA;
+
+  --shadow-sm: 2px 2px 0 #000000;
+  --shadow: 4px 4px 0 #000000;
+  --shadow-lg: 6px 6px 0 #000000;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--fb);
+  font-size: 16px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::selection { background: var(--accent); color: #141414; }
+
+a {
+  color: var(--accent-ink);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+a:hover { color: var(--ink); }
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+img { max-width: 100%; height: auto; }
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-family: var(--fh);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+
+p { margin: 0 0 1em; }
+p:last-child { margin-bottom: 0; }
+
+code, pre, .mono { font-family: var(--fm); }
+
+code {
+  font-size: 0.84em;
+  background: var(--panel-alt);
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  padding: 0.1em 0.35em;
+  overflow-wrap: break-word;
+}
+
+pre {
+  margin: 1.25em 0 0;
+  padding: 16px 18px;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+  line-height: 1.6;
+  -webkit-overflow-scrolling: touch;
+}
+pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-size: 12.5px;
+}
+
+.skip {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  padding: 10px 14px;
+  z-index: 100;
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 700;
+}
+.skip:focus { left: 16px; top: 16px; }
+
+.wrap {
+  width: min(var(--max), calc(100% - (var(--gutter) * 2)));
+  margin-inline: auto;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  background: #141414;
+  color: #F7F3EA;
+  border-bottom: 2px solid #141414;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.topbar .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 18px;
+  min-height: 32px;
+  padding: 6px 0;
+}
+.topbar .dot { width: 6px; height: 6px; background: var(--accent); flex: 0 0 auto; }
+.topbar .dot.soft { background: #555555; }
+.topbar .soft { color: #A3A3A3; }
+
+/* ---------- header ---------- */
+
+.site-head {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: var(--bg);
+  border-bottom: 2px solid var(--line);
+}
+.head-inner {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  min-height: 68px;
+  width: min(var(--max), calc(100% - (var(--gutter) * 2)));
+  margin-inline: auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  text-decoration: none;
+  min-width: 0;
+}
+.brand:hover { color: var(--ink); }
+.brand svg { flex: 0 0 auto; display: block; }
+.brand-word {
+  font-family: var(--fh);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+.brand-tag {
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.head-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: auto;
+}
+.head-nav a {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding: 4px 0;
+}
+.head-nav a:hover { border-bottom-color: var(--accent); color: var(--ink); }
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 6px 10px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.theme-toggle:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--ink); }
+.theme-toggle:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--ink); }
+.theme-toggle .glyph { font-size: 14px; line-height: 1; }
+
+/* ---------- hero ---------- */
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: clamp(32px, 6vw, 72px);
+  align-items: center;
+  padding: clamp(46px, 7vw, 84px) 0 clamp(38px, 5vw, 56px);
+  border-bottom: 2px solid var(--line);
+}
+
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 22px;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow .tag {
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  padding: 3px 7px;
+}
+.eyebrow .sep { color: var(--faint); }
+
+.hero h1 {
+  font-size: clamp(2.6rem, 6vw, 4.8rem);
+  line-height: 0.99;
+  letter-spacing: -0.05em;
+  margin-bottom: 24px;
+  max-width: 16ch;
+}
+.mark {
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  padding: 0 0.08em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  display: inline-block;
+  transform: rotate(-1deg);
+}
+
+.lede {
+  max-width: 62ch;
+  font-size: clamp(1rem, 1.35vw, 1.12rem);
+  line-height: 1.65;
+  color: var(--muted);
+  margin-bottom: 26px;
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 28px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 var(--ink);
+  font-family: var(--fm);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.actions { display: flex; flex-wrap: wrap; gap: 12px; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 9px 17px;
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-family: var(--fm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.btn:hover { background: var(--accent); color: #141414; transform: translate(-2px, -2px); box-shadow: var(--shadow-lg); }
+.btn:active { transform: translate(3px, 3px); box-shadow: 0 0 0 #141414; }
+.btn.ghost { background: var(--panel); color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { background: var(--panel); color: var(--ink); }
+
+/* The two earned shadows: the hero plate and figures. */
+.hero-plate {
+  margin: 0;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.plate {
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.plate-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 2px solid var(--line);
+  background: var(--panel-alt);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.plate-head .lights { display: flex; gap: 5px; }
+.plate-head .lights span {
+  width: 8px; height: 8px; border: 1.5px solid var(--line); border-radius: 50%;
+}
+.plate-body { padding: 14px; }
+.plate-body pre {
+  margin: 0;
+  box-shadow: none;
+  border-width: 1px;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.hero-plate figcaption {
+  margin-top: 14px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--faint);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- notice ---------- */
+
+.notice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  margin: 26px 0 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.stamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;
+  min-height: 28px;
+  padding: 3px 7px;
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+.notice strong { color: var(--ink); font-weight: 600; }
+
+/* ---------- shell / toc ---------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 210px minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 64px);
+  padding: clamp(40px, 6vw, 64px) 0 76px;
+  align-items: start;
+}
+
+.toc {
+  position: sticky;
+  top: 96px;
+  font-size: 12px;
+}
+.toc-title {
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 2px solid var(--line);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+.toc ol { list-style: none; margin: 0; padding: 0; }
+.toc li { margin: 0; }
+.toc a {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 7px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--muted);
+  text-decoration: none;
+  line-height: 1.4;
+}
+.toc a:hover { color: var(--ink); }
+.toc .n { font-family: var(--fm); font-size: 9px; font-weight: 700; color: var(--accent-ink); padding-top: 2px; }
+
+.mobile-toc { display: none; }
+
+.prose { min-width: 0; max-width: 780px; }
+
+.section {
+  padding: 0 0 48px;
+  margin: 0 0 48px;
+  border-bottom: 2px solid var(--line);
+  scroll-margin-top: 86px;
+}
+.section:last-of-type { border-bottom: 0; margin-bottom: 0; }
+
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.sec-num {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background: var(--accent);
+  color: #141414;
+  border: 2px solid #141414;
+  box-shadow: 3px 3px 0 #141414;
+  font-family: var(--fh);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.section h2 {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  letter-spacing: -0.04em;
+}
+.section h3 {
+  font-size: 1.06rem;
+  margin: 30px 0 8px;
+  letter-spacing: -0.02em;
+}
+.section h3:first-child { margin-top: 0; }
+.section p { color: var(--muted); }
+.section p strong { color: var(--ink); font-weight: 600; }
+.section ul, .section ol { color: var(--muted); padding-left: 1.25em; margin: 0 0 1em; }
+.section li { margin: 0 0 0.5em; }
+.section li::marker { color: var(--accent-ink); }
+.section li strong { color: var(--ink); font-weight: 600; }
+
+.grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 26px 0 8px;
+}
+.card {
+  min-width: 0;
+  padding: 17px 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.card h3 { font-size: 0.98rem; margin: 0 0 8px; }
+.card p { font-size: 13px; line-height: 1.55; margin: 0; }
+
+.note {
+  margin: 24px 0;
+  padding: 16px 18px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-left: 10px solid var(--accent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.note strong {
+  display: block;
+  margin-bottom: 4px;
+  font-family: var(--fh);
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.note p { color: var(--muted); margin: 0; }
+.note.warn { border-left-color: var(--warn); }
+.note.warn strong { color: var(--warn); }
+
+/* ---------- tables ---------- */
+
+.table-wrap {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 24px 0;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  -webkit-overflow-scrolling: touch;
+}
+table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+caption {
+  text-align: left;
+  padding: 11px 14px;
+  border-bottom: 2px solid var(--line);
+  background: var(--panel-alt);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+th {
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--panel-alt);
+  border-bottom: 2px solid var(--line);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  vertical-align: bottom;
+}
+td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--muted);
+}
+tr:last-child td { border-bottom: 0; }
+td strong { color: var(--ink); font-weight: 600; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border: 1.5px solid var(--line);
+  border-radius: 2px;
+  background: var(--panel);
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.badge.ok { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.badge.partial { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.badge.no { background: var(--panel-alt); border-color: var(--line-soft); color: var(--faint); }
+.badge.fail { background: var(--fail-soft); border-color: var(--fail); color: var(--fail); }
+
+/* ---------- figures ---------- */
+
+.figure { margin: 26px 0 8px; padding: 0; }
+.figure-cap {
+  margin-top: 12px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.65;
+  color: var(--faint);
+}
+.figure-cap strong { color: var(--muted); }
+
+.arch {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px minmax(0, 1.25fr) 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  padding: 18px;
+  background: var(--panel-alt);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.arch-col { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+.arch-label {
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.arch-box {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: 2px;
+  box-shadow: var(--shadow-sm);
+  padding: 10px 11px;
+  min-width: 0;
+}
+.arch-box strong { display: block; font-family: var(--fh); font-size: 12.5px; font-weight: 700; line-height: 1.25; color: var(--ink); }
+.arch-box span { display: block; font-size: 10.5px; line-height: 1.45; color: var(--muted); margin-top: 3px; }
+.arch-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--fm);
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+/* ---------- lifecycle ---------- */
+
+.lifecycle {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 22px;
+  margin: 26px 0 0;
+  counter-reset: stage;
+}
+.stage {
+  position: relative;
+  min-width: 0;
+  padding: 14px 12px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.stage:not(:last-child)::after {
+  content: "→";
+  position: absolute;
+  right: -18px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--fm);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+.stage .k {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent-ink);
+  margin-bottom: 6px;
+}
+.stage strong { display: block; font-family: var(--fh); font-size: 12.5px; line-height: 1.25; margin-bottom: 4px; color: var(--ink); }
+.stage p { font-size: 10.5px; line-height: 1.45; margin: 0; color: var(--muted); }
+
+/* ---------- findings ---------- */
+
+.findings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0 0;
+}
+.finding {
+  min-width: 0;
+  padding: 16px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.finding .fid {
+  display: inline-block;
+  margin-bottom: 7px;
+  padding: 2px 6px;
+  background: var(--panel-alt);
+  border: 1.5px solid var(--line);
+  font-family: var(--fm);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent-ink);
+}
+.finding h3 { font-size: 0.98rem; margin: 0 0 8px; }
+.finding p { font-size: 12.5px; line-height: 1.55; margin: 0 0 8px; color: var(--muted); }
+.finding p:last-child { margin-bottom: 0; }
+.lbl {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 1px;
+}
+
+/* ---------- scope ---------- */
+
+.cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  margin: 22px 0;
+}
+.cols > div { min-width: 0; }
+.cols h3 { margin: 0 0 10px; }
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li {
+  position: relative;
+  padding: 8px 0 8px 26px;
+  margin: 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.checklist li::before {
+  position: absolute;
+  left: 0;
+  top: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid currentColor;
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ok);
+  content: "+";
+}
+.checklist.no li::before { color: var(--faint); content: "−"; }
+
+.limits { counter-reset: lim; list-style: none; padding: 0; margin: 18px 0 0; }
+.limits li {
+  counter-increment: lim;
+  position: relative;
+  padding: 11px 0 11px 38px;
+  margin: 0;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.limits li::before {
+  content: counter(lim, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 12px;
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-ink);
+}
+
+/* ---------- proof ---------- */
+
+.proof-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0;
+}
+.proof-card {
+  min-width: 0;
+  padding: 15px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.proof-card .k {
+  display: block;
+  font-family: var(--fm);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 6px;
+}
+.proof-card strong { display: block; font-family: var(--fh); font-size: 13px; line-height: 1.3; margin-bottom: 4px; }
+.proof-card p { font-size: 11.5px; line-height: 1.5; margin: 0; }
+
+.summary-box {
+  margin: 24px 0 0;
+  padding: 20px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.summary-box p { font-size: 14.5px; line-height: 1.7; }
+
+.byline {
+  margin-top: 10px;
+  padding: 20px;
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.byline p { font-size: 13px; margin: 0 0 8px; }
+.byline p:last-child { margin-bottom: 0; }
+.byline strong { color: var(--ink); }
+
+.top-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 24px;
+  padding: 6px 10px;
+  border: 2px solid var(--line);
+  box-shadow: var(--shadow-sm);
+  background: var(--panel);
+  font-family: var(--fm);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--ink);
+}
+.top-link:hover { background: var(--accent); color: #141414; }
+
+/* ---------- footer ---------- */
+
+footer {
+  border-top: 2px solid var(--line);
+  padding: 26px 0 38px;
+  font-family: var(--fm);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px 30px;
+}
+.foot-inner p { margin: 0; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 18px; }
+.foot-links a { color: var(--muted); text-decoration: none; }
+.foot-links a:hover { color: var(--accent-ink); text-decoration: underline; }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 1000px) {
+  .hero { grid-template-columns: minmax(0, 1fr); }
+  .hero h1 { max-width: 18ch; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .toc { display: none; }
+  .mobile-toc {
+    display: block;
+    margin-bottom: 34px;
+    background: var(--panel);
+    border: 2px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+  }
+  .mobile-toc summary {
+    cursor: pointer;
+    padding: 12px 14px;
+    font-family: var(--fm);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink);
+    list-style: none;
+  }
+  .mobile-toc summary::-webkit-details-marker { display: none; }
+  .mobile-toc summary::after { content: "+"; float: right; color: var(--accent-ink); }
+  .mobile-toc[open] summary::after { content: "−"; }
+  .mobile-toc ol { list-style: none; margin: 0; padding: 0 14px 10px; }
+  .mobile-toc a {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 7px;
+    padding: 7px 0;
+    border-top: 1px solid var(--line-soft);
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .mobile-toc .n { font-family: var(--fm); font-size: 9px; font-weight: 700; color: var(--accent-ink); }
+  .prose { max-width: 100%; }
+  .head-nav { display: none; }
+  .theme-toggle { margin-left: auto; }
+}
+
+@media (max-width: 820px) {
+  .arch { grid-template-columns: minmax(0, 1fr); }
+  .arch-arrow { transform: rotate(90deg); padding: 2px 0; }
+  .lifecycle { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .stage:not(:last-child)::after { content: "↓"; right: 12px; top: auto; bottom: -16px; transform: none; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .findings { grid-template-columns: minmax(0, 1fr); }
+  .cols { grid-template-columns: minmax(0, 1fr); }
+  .proof-strip { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 620px) {
+  .brand-tag { display: none; }
+  .topbar .soft, .topbar .dot.soft { display: none; }
+  .hero { padding-top: 38px; }
+  .hero h1 { font-size: clamp(2.3rem, 11vw, 3rem); }
+  .notice { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+  .stamp { justify-self: start; }
+  .section { padding-bottom: 36px; margin-bottom: 36px; }
+  .section-head { gap: 11px; }
+  .sec-num { width: 34px; height: 34px; font-size: 12px; }
+  .theme-toggle { min-height: 44px; padding: 6px 10px; }
+  .chips { gap: 7px; }
+  .chip { font-size: 8.5px; }
+  .byline, .summary-box { padding: 16px; }
+  .foot-inner { flex-direction: column; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+@media print {
+  .topbar, .site-head, .toc, .mobile-toc, .actions, .theme-toggle, .top-link { display: none !important; }
+  body { background: #FFFFFF; color: #000000; font-size: 11pt; }
+  .shell { display: block; padding: 0; }
+  .section { break-inside: avoid; }
+  .hero { display: block; }
+  .plate, .card, .note, .table-wrap, .summary-box, .byline { box-shadow: none; }
+  a { color: #000000; }
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<div class="topbar">
+  <div class="wrap">
+    <span>PACMAN publication</span>
+    <span class="dot" aria-hidden="true"></span>
+    <span>Documentation, not a sales page</span>
+    <span class="dot soft" aria-hidden="true"></span>
+    <span class="soft">No live credentials, organisation data, or internal addresses published</span>
+  </div>
+</div>
+
+<header class="site-head">
+  <div class="head-inner">
+    <a class="brand" href="#top" aria-label="PACMAN publication, back to top">
+      <svg width="40" height="30" viewBox="0 0 64 64" aria-hidden="true">
+        <path d="M27 32 L44.6 20.6 A21 21 0 1 0 44.6 43.4 Z" fill="currentColor" />
+        <circle cx="56" cy="32" r="5" fill="#F26522" />
+      </svg>
+      <span class="brand-word">pacman</span>
+      <span class="brand-tag">Publication</span>
+    </a>
+
+    <nav class="head-nav" aria-label="Publication sections">
+      <a href="#rules">Rule model</a>
+      <a href="#safety">Safety</a>
+      <a href="#findings">Findings</a>
+      <a href="#evidence">Evidence</a>
+    </nav>
+
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false">
+      <span class="glyph" aria-hidden="true">☾</span>
+      <span class="label">Dark</span>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap" id="top">
+
+    <section class="hero" aria-labelledby="hero-title">
+      <div>
+        <p class="eyebrow">
+          <span class="tag">Publication</span>
+          <span>Reviewed 2 November 2026</span>
+        </p>
+
+        <h1 id="hero-title">A safe control plane for the file that routes <span class="mark">everything.</span></h1>
+
+        <p class="lede">
+          PACMAN manages a live <code>proxy.pac</code> without owning it. Rules live inside a
+          <strong>marked block</strong>; the rest of the file is preserved byte for byte. Every change is
+          previewed, executed against representative hosts in a sandbox, written atomically, verified on
+          disk, and snapshotted. This page documents the model, the safety pipeline, what an analysis of a
+          real production PAC found, and what the tool does not claim.
+        </p>
+
+        <div class="chips" aria-label="Technical summary">
+          <span class="chip">PAC v3 markers</span>
+          <span class="chip">Direct / proxy / chain</span>
+          <span class="chip">QuickJS guard</span>
+          <span class="chip">Atomic write</span>
+          <span class="chip">Snapshots + rollback</span>
+          <span class="chip">Hash-chained audit</span>
+        </div>
+
+        <div class="actions">
+          <a class="btn" href="#context">Read the record</a>
+          <a class="btn ghost" href="#evidence">See the evidence</a>
+        </div>
+      </div>
+
+      <figure class="hero-plate">
+        <div class="plate">
+          <div class="plate-head">
+            <span>proxy.pac — managed block</span>
+            <span class="lights" aria-hidden="true"><span></span><span></span><span></span></span>
+          </div>
+          <div class="plate-body">
+<pre><code>// --- PACMAN_ROUTES_START ---
+// pacman:block v=3 generated=… rules=3
+if (host === "teams.example.com")
+  return "DIRECT";
+if (host === "portal.example.com")
+  return "PROXY 192.0.2.10:8080";
+if (host === "intranet.example.com")
+  return "PROXY 192.0.2.10:8080; PROXY 192.0.2.11:8080; DIRECT";
+return FPProxy();          // base file, untouched
+// --- PACMAN_ROUTES_END ---</code></pre>
+          </div>
+        </div>
+        <figcaption>
+          A rendered block. Values are RFC 2606 / RFC 5737 placeholders; the closing
+          <code>return</code> belongs to the base file and is never edited.
+        </figcaption>
+      </figure>
+    </section>
+
+    <div class="notice">
+      <span class="stamp" aria-hidden="true">NOTE</span>
+      <p>
+        <strong>This page publishes method and architecture, not a customer configuration.</strong>
+        It contains no production hostnames, internal addresses, credentials, or organisation names.
+        All examples use reserved documentation values. Statements are scoped to the repository state
+        reviewed above; the product repository is private, so paths are cited as evidence, not linked.
+      </p>
+    </div>
+
+    <div class="shell">
+      <nav class="toc" aria-label="Contents">
+        <p class="toc-title">Contents</p>
+        <ol>
+          <li><a href="#context"><span class="n">01</span> Context</a></li>
+          <li><a href="#built"><span class="n">02</span> What was built</a></li>
+          <li><a href="#architecture"><span class="n">03</span> Architecture</a></li>
+          <li><a href="#rules"><span class="n">04</span> Rule model</a></li>
+          <li><a href="#safety"><span class="n">05</span> Write path</a></li>
+          <li><a href="#markers"><span class="n">06</span> Markers &amp; legacy</a></li>
+          <li><a href="#health"><span class="n">07</span> Health &amp; balancing</a></li>
+          <li><a href="#deploy"><span class="n">08</span> Deployment</a></li>
+          <li><a href="#findings"><span class="n">09</span> Findings</a></li>
+          <li><a href="#limits"><span class="n">10</span> Scope &amp; limits</a></li>
+          <li><a href="#evidence"><span class="n">11</span> Evidence</a></li>
+          <li><a href="#summary"><span class="n">12</span> Summary</a></li>
+        </ol>
+      </nav>
+
+      <article class="prose">
+
+        <details class="mobile-toc">
+          <summary>Contents</summary>
+          <ol>
+            <li><a href="#context"><span class="n">01</span> Context</a></li>
+            <li><a href="#built"><span class="n">02</span> What was built</a></li>
+            <li><a href="#architecture"><span class="n">03</span> Architecture</a></li>
+            <li><a href="#rules"><span class="n">04</span> Rule model</a></li>
+            <li><a href="#safety"><span class="n">05</span> Write path</a></li>
+            <li><a href="#markers"><span class="n">06</span> Markers &amp; legacy</a></li>
+            <li><a href="#health"><span class="n">07</span> Health &amp; balancing</a></li>
+            <li><a href="#deploy"><span class="n">08</span> Deployment</a></li>
+            <li><a href="#findings"><span class="n">09</span> Findings</a></li>
+            <li><a href="#limits"><span class="n">10</span> Scope &amp; limits</a></li>
+            <li><a href="#evidence"><span class="n">11</span> Evidence</a></li>
+            <li><a href="#summary"><span class="n">12</span> Summary</a></li>
+          </ol>
+        </details>
+
+        <section class="section" id="context">
+          <div class="section-head">
+            <span class="sec-num">01</span>
+            <h2>Context</h2>
+          </div>
+
+          <p>
+            A PAC file is executable policy. Every browser in the estate evaluates
+            <code>FindProxyForURL</code> on every request, so one broken line can send a bank's internal
+            traffic through a proxy that cannot reach it — or quietly bypass the proxy for a domain that
+            should never leave the network.
+          </p>
+
+          <div class="grid-3">
+            <div class="card">
+              <h3>It is edited by hand</h3>
+              <p>
+                PAC files grow by append. A rule is added for one application, then another, with no
+                owner, no test, and no history beyond a comment with a date.
+              </p>
+            </div>
+            <div class="card">
+              <h3>Failures are silent</h3>
+              <p>
+                A missing return, an unanchored wildcard, or a DNS check in the wrong order does not
+                raise an error. It changes routing and nobody notices until a team cannot log in.
+              </p>
+            </div>
+            <div class="card">
+              <h3>The blast radius is the estate</h3>
+              <p>
+                Unlike an application config, a mistake here is served to every client at once and
+                cached by browsers. Rolling back means finding the old file first.
+              </p>
+            </div>
+          </div>
+
+          <p style="margin-top:24px">
+            PACMAN's goal is narrow: keep the file that already works, and make the part being changed
+            small, reviewable, testable, and reversible. It is a control plane for a marked region, not a
+            replacement for the proxy or for network design.
+          </p>
+        </section>
+
+        <section class="section" id="built">
+          <div class="section-head">
+            <span class="sec-num">02</span>
+            <h2>What was built</h2>
+          </div>
+
+          <p>
+            The product is a single-organization admin application with a React SPA, a FastAPI backend,
+            and SQLite as the system of record. The table is the functional inventory; the sections that
+            follow cover the parts that carry the engineering weight.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Functional inventory as implemented in the reviewed source.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Area</th>
+                  <th scope="col">Capability</th>
+                  <th scope="col">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Rules</strong></td>
+                  <td>Host, wildcard, IPv4, IPv6 and CIDR entries with duplicate, conflict and shadow detection.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Routes</strong></td>
+                  <td>Direct, via a registered proxy, or an ordered failover chain that always ends in <code>DIRECT</code>.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Registry</strong></td>
+                  <td>Proxies are referenced by id; a rule can never contain a raw <code>host:port</code>.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Safety guard</strong></td>
+                  <td>QuickJS compile and execution against representative hosts, with required directives per change.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Degraded mode</strong></td>
+                  <td>Structural validation when the sandbox is unavailable; reported as degraded, never silently.</td>
+                  <td><span class="badge partial">◐ Optional</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Write pipeline</strong></td>
+                  <td>Preview, guard, atomic write, read-back verification, snapshot, rollback.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Audit</strong></td>
+                  <td>Append-only, hash-chained records with an on-demand chain verification.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Markers</strong></td>
+                  <td>v3 block markers, legacy v2 read, in-place upgrade, and a repair flow for files that have none.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Legacy analysis</strong></td>
+                  <td>Reads <code>dnsDomainIs</code>, <code>shExpMatch</code>, <code>host ===</code> and <code>isInNet</code>; lists what it cannot convert; lints known defect classes.</td>
+                  <td><span class="badge partial">◐ Subset</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Proxy health</strong></td>
+                  <td>TCP probe on write and every five minutes, smoothed latency, score, and a suggested failover order.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Deployment</strong></td>
+                  <td>Docker Compose, SQLite migrations at boot, SPA cache policy, loopback-bound admin port.</td>
+                  <td><span class="badge ok">● Implemented</span></td>
+                </tr>
+                <tr>
+                  <td><strong>Out of scope</strong></td>
+                  <td>Being the proxy, client agents, high availability, SSO/SCIM, and runtime load balancing.</td>
+                  <td><span class="badge no">○ Not claimed</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note">
+            <strong>One organisation, one file</strong>
+            <p>
+              PACMAN assumes one team owns the server, the PAC file, and the proxy registry. It is not a
+              multi-tenant service and does not attempt to model several estates in one installation.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="architecture">
+          <div class="section-head">
+            <span class="sec-num">03</span>
+            <h2>Architecture</h2>
+          </div>
+
+          <p>
+            The SPA never writes files. It calls the API; the API is the only component with a write
+            path, and that path runs the full safety pipeline. SQLite is authoritative for rules and
+            history; the PAC file is generated output. Nginx serves the result to clients and never talks
+            to the database.
+          </p>
+
+          <figure class="figure">
+            <div class="arch" role="img" aria-label="Architecture diagram: an operator uses a React SPA, which calls a FastAPI backend containing the rules service, the safety guard, the versions store, and the audit log. The backend writes the PAC file atomically; nginx serves that file to browsers, which evaluate it.">
+              <div class="arch-col">
+                <span class="arch-label">Clients</span>
+                <div class="arch-box">
+                  <strong>Operator</strong>
+                  <span>React SPA · routing rules, registry, versions, audit</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Browsers</strong>
+                  <span>Evaluate the PAC on every request</span>
+                </div>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">→</div>
+
+              <div class="arch-col">
+                <span class="arch-label">Application</span>
+                <div class="arch-box">
+                  <strong>FastAPI</strong>
+                  <span>Rules · preview · simulate · reconcile</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Safety guard</strong>
+                  <span>QuickJS sandbox · required directives</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Writer</strong>
+                  <span>Atomic replace · read-back hash check</span>
+                </div>
+                <div class="arch-box">
+                  <strong>Analyzer</strong>
+                  <span>Read a legacy PAC without executing it</span>
+                </div>
+              </div>
+
+              <div class="arch-arrow" aria-hidden="true">→</div>
+
+              <div class="arch-col">
+                <span class="arch-label">State &amp; delivery</span>
+                <div class="arch-box">
+                  <strong>SQLite</strong>
+                  <span>Rules · proxies · versions · audit chain</span>
+                </div>
+                <div class="arch-box">
+                  <strong>proxy.pac</strong>
+                  <span>BASE text + one marked block</span>
+                </div>
+                <div class="arch-box">
+                  <strong>nginx</strong>
+                  <span>Serves the file; short cache, no write path</span>
+                </div>
+              </div>
+            </div>
+            <figcaption class="figure-cap">
+              <strong>Figure 1.</strong> Runtime shape. The database is authoritative; the PAC file is a
+              build artefact that is verified after every write.
+            </figcaption>
+          </figure>
+
+          <h3>Why this shape</h3>
+          <ul>
+            <li><strong>One writer.</strong> Only the API writes the file, so every change passes the same guard and produces the same snapshot.</li>
+            <li><strong>The file is not the database.</strong> Rules are stored logically; the renderer produces directives, which keeps the output stable and diffable.</li>
+            <li><strong>Serving is boring.</strong> Nginx serves a static file. A failed admin UI, database outage, or guard problem cannot change routing by itself.</li>
+          </ul>
+        </section>
+
+        <section class="section" id="rules">
+          <div class="section-head">
+            <span class="sec-num">04</span>
+            <h2>Rule model</h2>
+          </div>
+
+          <p>
+            A rule is a selector plus an ordered route. The route is a list of tokens rather than an enum,
+            because a failover chain is not a different kind of thing — it is three proxies and a fallback
+            in a specific order.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Route kinds are derived from the token list, not stored as separate types.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Tokens</th>
+                  <th scope="col">Rendered directive</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Direct</strong></td>
+                  <td><code>["DIRECT"]</code></td>
+                  <td><code>DIRECT</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Via proxy</strong></td>
+                  <td><code>[1]</code></td>
+                  <td><code>PROXY 192.0.2.10:8080</code></td>
+                </tr>
+                <tr>
+                  <td><strong>Failover chain</strong></td>
+                  <td><code>[1, 2, "DIRECT"]</code></td>
+                  <td><code>PROXY 192.0.2.10:8080; PROXY 192.0.2.11:8080; DIRECT</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            The <code>DIRECT</code> tail is fixed by the model. A chain that ends in nothing is a chain
+            that can take a host offline when every proxy is unhealthy; the renderer will not produce one.
+            If strict proxying is a policy requirement, that is a deliberate product decision, not a
+            default.
+          </p>
+
+          <h3>Ordering is part of the contract</h3>
+          <p>
+            Rules are emitted in a stable order by selector type and value, so the same database always
+            produces the same bytes. Before a change is accepted, the service rejects duplicates,
+            same-host conflicts, and rules that would be shadowed by an earlier, broader selector — the
+            exact class of defect that turns a hand-edited PAC into archaeology.
+          </p>
+
+          <div class="note warn">
+            <strong>A selector type is not a priority lesson you can skip</strong>
+            <p>
+              An exact IP rule renders as <code>host === "192.0.2.10"</code>. It matches a request whose
+              host <em>is</em> that address, not a hostname that resolves to it. A <code>/32</code> CIDR
+              rule is the one that resolves the host. Publishing that distinction is cheaper than
+              debugging it later.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="safety">
+          <div class="section-head">
+            <span class="sec-num">05</span>
+            <h2>Write path</h2>
+          </div>
+
+          <p>
+            No control in this product matters more than the order of operations on disk. A change is
+            never applied because the form posted successfully; it is applied because the candidate passed
+            the guard, reached the disk intact, and produced a snapshot.
+          </p>
+
+          <div class="lifecycle" aria-label="Five stages of a write">
+            <div class="stage">
+              <span class="k">01 / PREVIEW</span>
+              <strong>Show the consequence</strong>
+              <p>Entries are parsed and classified. The diff and per-entry outcome are returned before anything is written.</p>
+            </div>
+            <div class="stage">
+              <span class="k">02 / GUARD</span>
+              <strong>Run the file</strong>
+              <p>The candidate is compiled and executed in a sandbox against hosts that must resolve to specific directives.</p>
+            </div>
+            <div class="stage">
+              <span class="k">03 / WRITE</span>
+              <strong>Replace atomically</strong>
+              <p>Write to a temporary file and replace under a lock, so a reader never sees a half-written PAC.</p>
+            </div>
+            <div class="stage">
+              <span class="k">04 / VERIFY</span>
+              <strong>Read it back</strong>
+              <p>The bytes are re-read and hashed. A mismatch restores the previous file and fails the request.</p>
+            </div>
+            <div class="stage">
+              <span class="k">05 / SNAPSHOT</span>
+              <strong>Make it reversible</strong>
+              <p>A full-file version is recorded with the actor, reason, and rule payload, before the operator moves on.</p>
+            </div>
+          </div>
+
+          <h3>The file is spliced, not regenerated</h3>
+          <p>
+            The base PAC is preserved exactly. The service locates the markers and replaces only the
+            region between them, keeping comments, helper functions, and the fallback return untouched.
+            A file with legacy markers is upgraded in place on its next write; a file with no markers is
+            adopted, not overwritten.
+          </p>
+
+          <div class="note">
+            <strong>Last-known-good is a fallback, not a promise</strong>
+            <p>
+              Every successful write is a snapshot, and restoring one re-runs the same guard rather than
+              copying blindly. Retention and the reaper are bounded, so this is an operational recovery
+              path, not an archival system.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="markers">
+          <div class="section-head">
+            <span class="sec-num">06</span>
+            <h2>Markers, repair, and legacy files</h2>
+          </div>
+
+          <p>
+            Markers are the contract that makes byte-preserving edits possible. They also create the first
+            real problem: most production PAC files do not have them.
+          </p>
+
+          <h3>Where the block goes is a decision</h3>
+          <p>
+            The repair flow offers two policies, and they are not cosmetic:
+          </p>
+          <ul>
+            <li><strong>Additive</strong> inserts the block immediately before the function's unconditional fallback return. Existing rules keep precedence; managed rules only decide what is left.</li>
+            <li><strong>Authoritative</strong> inserts it at the top of <code>FindProxyForURL</code>, so managed rules win over the hand-written ones.</li>
+          </ul>
+          <p>
+            The naive choice — before the closing brace — is wrong for the most common PAC shape. If a file
+            ends with <code>return FPProxy();</code>, a block appended after that return is unreachable
+            code. The planner now detects the terminal statement, inserts before it, and reports the line
+            it chose. If no reachable point exists, it refuses rather than writing a block that can never
+            run.
+          </p>
+
+          <h3>Reading a legacy file without executing it</h3>
+          <p>
+            The analyzer parses a safe subset of the PAC idioms into rule candidates, resolves helper
+            functions to the literal they return, and lists everything it cannot represent instead of
+            dropping it. On a production file this produced a complete inventory and a defect list
+            before any migration was attempted.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>What the analyzer recognises, and what it reports as not representable.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Construct</th>
+                  <th scope="col">Becomes</th>
+                  <th scope="col">Result</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>host === "x"</code></td>
+                  <td>Domain rule</td>
+                  <td><span class="badge ok">● Convertible</span></td>
+                </tr>
+                <tr>
+                  <td><code>dnsDomainIs(host, "x")</code></td>
+                  <td>Domain rule</td>
+                  <td><span class="badge ok">● Convertible</span></td>
+                </tr>
+                <tr>
+                  <td><code>shExpMatch(host, "*.x")</code></td>
+                  <td>Wildcard rule</td>
+                  <td><span class="badge ok">● Convertible</span></td>
+                </tr>
+                <tr>
+                  <td><code>isInNet(ip, net, mask)</code></td>
+                  <td>CIDR rule</td>
+                  <td><span class="badge ok">● Convertible</span></td>
+                </tr>
+                <tr>
+                  <td><code>myIpAddress()</code></td>
+                  <td>—</td>
+                  <td><span class="badge partial">◐ Client-aware</span></td>
+                </tr>
+                <tr>
+                  <td><code>shExpMatch(url, …)</code></td>
+                  <td>—</td>
+                  <td><span class="badge partial">◐ URL condition</span></td>
+                </tr>
+                <tr>
+                  <td><code>isPlainHostName(host)</code></td>
+                  <td>—</td>
+                  <td><span class="badge partial">◐ No rule type</span></td>
+                </tr>
+                <tr>
+                  <td><code>isInNetEx()</code> / time ranges</td>
+                  <td>—</td>
+                  <td><span class="badge partial">◐ No rule type</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p>
+            The lint pass is where the tool earns its keep. It flags the defects that are invisible in
+            review:
+          </p>
+
+<pre><code>if (shExpMatch(host, "publishers.example.com"))
+
+if (isPlainHostName(host) || shExpMatch(host, "*.local"))
+    return "DIRECT";</code></pre>
+
+          <p style="margin-top:14px">
+            The first <code>if</code> has no body, so the entire internal-host block becomes its body and
+            only ever runs for that one hostname. The file parses, serves, and silently proxies every
+            short name and <code>.local</code> host it was meant to keep direct. PACMAN reports it as an
+            error with the line number: <em>“This if has no body, so the entire next block becomes its
+            body.”</em>
+          </p>
+        </section>
+
+        <section class="section" id="health">
+          <div class="section-head">
+            <span class="sec-num">07</span>
+            <h2>Proxy health and the balancing boundary</h2>
+          </div>
+
+          <p>
+            Health data is advisory. A PAC file is static, so nothing in the probe path is consulted while
+            serving. The probes exist to warn before a rule is saved and to make a failover order
+            defensible.
+          </p>
+
+          <ul>
+            <li><strong>One TCP connect, ≤1.5 s, no HTTP round trip.</strong> Cheap enough to run on create, on address change, and on a five-minute sweep.</li>
+            <li><strong>Smoothed latency.</strong> A new sample moves the average by 30%, so one slow connect does not reorder the registry.</li>
+            <li><strong>Failure history.</strong> Consecutive failures and lifetime availability are recorded alongside the last probe.</li>
+            <li><strong>A score, not a verdict.</strong> Reachability first, then latency, then stability. The UI shows the number and the evidence side by side.</li>
+          </ul>
+
+          <div class="note warn">
+            <strong>What PACMAN cannot do: load balance</strong>
+            <p>
+              A PAC file has no runtime load balancing. The browser walks the directive list and stops at
+              the first proxy that answers, so the only lever is <em>order</em>. A file that rotates that
+              order per client is doing PAC-level client spreading, and that logic lives outside the
+              managed block — which is why the analyzer reports <code>myIpAddress()</code> as not
+              representable instead of pretending to convert it.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="deploy">
+          <div class="section-head">
+            <span class="sec-num">08</span>
+            <h2>Deployment</h2>
+          </div>
+
+          <p>
+            One container, one data directory, one published admin port. The PAC file is a bind mount so
+            the web server can serve it without going through the application.
+          </p>
+
+<pre><code>docker compose -f deploy/docker-compose.yml up -d --build</code></pre>
+
+          <p style="margin-top:14px">
+            On boot the application applies numbered SQL migrations, ensures its directories exist, and
+            refuses to start if the validator configuration is unknown. The SPA shell is served
+            <code>no-cache</code>; hashed assets are immutable. That combination is deliberate: a rebuilt
+            UI must never be masked by a cached shell.
+          </p>
+
+          <div class="table-wrap">
+            <table>
+              <caption>Operational surface.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Concern</th>
+                  <th scope="col">Default</th>
+                  <th scope="col">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Admin port</strong></td>
+                  <td>Bound to loopback</td>
+                  <td>Publish it deliberately; put TLS in front before exposing it.</td>
+                </tr>
+                <tr>
+                  <td><strong>PAC delivery</strong></td>
+                  <td>Static file via web server</td>
+                  <td>Short cache window; clients refetch on their own schedule.</td>
+                </tr>
+                <tr>
+                  <td><strong>State</strong></td>
+                  <td>SQLite + versions directory</td>
+                  <td>Back up both; the database alone cannot restore a file.</td>
+                </tr>
+                <tr>
+                  <td><strong>Validator</strong></td>
+                  <td>QuickJS</td>
+                  <td>Structural mode exists for development and is reported as degraded.</td>
+                </tr>
+                <tr>
+                  <td><strong>Migrations</strong></td>
+                  <td>Automatic at startup</td>
+                  <td>Versioned; a failed migration is retried rather than silently skipped.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="findings">
+          <div class="section-head">
+            <span class="sec-num">09</span>
+            <h2>What the review of a production PAC found</h2>
+          </div>
+
+          <p>
+            PACMAN was built alongside a review of a real, working, hand-maintained PAC file. The file had
+            been in service for months and passed every visual inspection. Running it found the following.
+            Hostnames are replaced with reserved examples; the defects are unchanged.
+          </p>
+
+          <div class="findings">
+            <div class="finding">
+              <span class="fid">PAC-01</span>
+              <h3>One missing return disabled a whole block</h3>
+              <p>
+                An <code>if</code> without a body swallowed the next section — eleven rule groups,
+                including every short hostname and <code>*.local</code> entry — so those hosts were being
+                proxied instead of going direct.
+              </p>
+              <p><span class="lbl">Impact</span> Internal applications routed through a proxy that could not reach them; no error anywhere.</p>
+              <p><span class="badge fail">✕ Fail</span></p>
+            </div>
+
+            <div class="finding">
+              <span class="fid">PAC-02</span>
+              <h3>An unanchored wildcard allowed a look-alike bypass</h3>
+              <p>
+                <code>shExpMatch(url, "https://partner.example*")</code> also matches
+                <code>partner.example.evil.test</code>, sending an unrelated domain <code>DIRECT</code>.
+              </p>
+              <p><span class="lbl">Impact</span> A proxy bypass for any domain that begins with the literal string.</p>
+              <p><span class="badge fail">✕ Fail</span></p>
+            </div>
+
+            <div class="finding">
+              <span class="fid">PAC-03</span>
+              <h3>DNS resolved before hostname decisions</h3>
+              <p>
+                <code>dnsResolve(host)</code> ran at the top of the function, so every request paid for a
+                lookup even when the decision was name-based, and proxied traffic leaked DNS to the client
+                resolver.
+              </p>
+              <p><span class="lbl">Impact</span> Unnecessary latency and a resolver dependency on every request.</p>
+              <p><span class="badge partial">◐ Partial</span></p>
+            </div>
+
+            <div class="finding">
+              <span class="fid">PAC-04</span>
+              <h3>Load spreading relied on the client address</h3>
+              <p>
+                The proxy order was rotated by <code>myIpAddress()</code>. Engines differ in what that
+                returns — commonly <code>127.0.0.1</code> in Chromium-based browsers — which collapses
+                every client onto one order and one first proxy.
+              </p>
+              <p><span class="lbl">Impact</span> Uneven load; the rotation can look correct in code and be inactive in the estate.</p>
+              <p><span class="badge partial">◐ Partial</span></p>
+            </div>
+          </div>
+
+          <div class="note">
+            <strong>The lesson is structural, not personal</strong>
+            <p>
+              Both serious defects are invisible to review and obvious to execution. A tool that can run
+              the file against known hosts, and lint the constructs it understands, catches them before
+              they are served.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" id="limits">
+          <div class="section-head">
+            <span class="sec-num">10</span>
+            <h2>Scope &amp; limits</h2>
+          </div>
+
+          <p>
+            The honest boundary matters as much as the feature list. The following are deliberate.
+          </p>
+
+          <div class="cols">
+            <div>
+              <h3>In scope</h3>
+              <ul class="checklist">
+                <li>Managing a marked rule block inside an existing PAC file.</li>
+                <li>Validating a candidate against representative hosts.</li>
+                <li>Versioning, restoring, and auditing every write.</li>
+                <li>Reading legacy constructs and reporting what cannot be converted.</li>
+                <li>Advisory proxy health and ordering suggestions.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Not claimed</h3>
+              <ul class="checklist no">
+                <li>Being the proxy, the DNS resolver, or the network policy engine.</li>
+                <li>Runtime load balancing between proxies.</li>
+                <li>Full PAC language conversion (arbitrary JavaScript, time ranges, URL logic).</li>
+                <li>High availability, clustering, or multi-tenancy.</li>
+                <li>Protecting a PAC file that is edited outside PACMAN after the fact.</li>
+              </ul>
+            </div>
+          </div>
+
+          <ol class="limits">
+            <li><strong>The guard proves behaviour, not intent.</strong> It executes a candidate and checks the directives it observes; it cannot know that a rule was a bad idea.</li>
+            <li><strong>Structural mode is degraded by definition.</strong> With both validators available, QuickJS is the production path; without it, the result is reported as degraded rather than presented as equivalent.</li>
+            <li><strong>Markers are the limit of authority.</strong> Bytes outside the markers are preserved and unmanaged. A hand edit inside the block is detected as drift, not repaired silently.</li>
+            <li><strong>Browser caching is outside our control.</strong> A correct file can still be served from a client cache; the PAC cache window is a deployment parameter, not a guarantee.</li>
+            <li><strong>The analyzer is a subset.</strong> It recognises the idioms that appear in operational PAC files and reports everything else. It never executes the script to analyse it.</li>
+            <li><strong>An exact IP rule is exact.</strong> It matches a literal host, not a name that resolves there. A <code>/32</code> CIDR rule is how you express “any host that resolves to this address”.</li>
+          </ol>
+        </section>
+
+        <section class="section" id="evidence">
+          <div class="section-head">
+            <span class="sec-num">11</span>
+            <h2>Evidence</h2>
+          </div>
+
+          <p>
+            Evidence below is from the reviewed repository state and from live validation against a
+            deployment, using reserved documentation values where a real value would be disclosed.
+          </p>
+
+          <div class="proof-strip">
+            <div class="proof-card">
+              <span class="k">Automated</span>
+              <strong>186 tests</strong>
+              <p>Parser, renderer, guard, markers, repair, analyzer, health scoring, cache policy, and API permissions.</p>
+            </div>
+            <div class="proof-card">
+              <span class="k">Live behaviour</span>
+              <strong>Three route kinds</strong>
+              <p>Direct, via proxy, and a failover chain were resolved from the served PAC and exercised with real connections.</p>
+            </div>
+            <div class="proof-card">
+              <span class="k">Failover</span>
+              <strong>1.5 s, then success</strong>
+              <p>The first chain hop was deliberately unreachable; the client fell through to the next proxy and completed the request.</p>
+            </div>
+          </div>
+
+          <h3>What the live run showed</h3>
+          <div class="table-wrap">
+            <table>
+              <caption>Hosts resolved through the deployed PAC file.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Selector</th>
+                  <th scope="col">Directive served</th>
+                  <th scope="col">Observed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><code>direct.example</code></td>
+                  <td><code>DIRECT</code></td>
+                  <td><span class="badge ok">● Bypassed proxy</span></td>
+                </tr>
+                <tr>
+                  <td><code>via.example</code></td>
+                  <td><code>PROXY 192.0.2.10:8080</code></td>
+                  <td><span class="badge ok">● Connected in 4 ms</span></td>
+                </tr>
+                <tr>
+                  <td><code>chain.example</code></td>
+                  <td><code>PROXY 192.0.2.99:8080; PROXY 192.0.2.10:8080; DIRECT</code></td>
+                  <td><span class="badge ok">● Fell over after 1.5 s</span></td>
+                </tr>
+                <tr>
+                  <td><code>teams.example.com</code></td>
+                  <td><code>DIRECT</code></td>
+                  <td><span class="badge ok">● Existing rule preserved</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Reproduce the shape, not the estate</h3>
+<pre><code># 1. Create the three routes, then fetch the served file
+curl -s "$PAC_URL" | grep -n "ROUTES_START\|return \"PROXY"
+
+# 2. Resolve a host the way the browser will
+node -e 'const vm=require("vm"); /* load the PAC, call FindProxyForURL */'
+
+# 3. Confirm the integrity report agrees with the file
+curl -s -b "$SESSION" "$ADMIN/api/rules/integrity" | jq '.ok, .routes'</code></pre>
+
+          <p style="margin-top:14px">
+            The published numbers above come from a test deployment. They are not a benchmark of a
+            production estate, and no customer configuration is reproduced.
+          </p>
+        </section>
+
+        <section class="section" id="summary">
+          <div class="section-head">
+            <span class="sec-num">12</span>
+            <h2>Summary</h2>
+          </div>
+
+          <div class="summary-box">
+            <p>
+              PACMAN treats a PAC file as production code: a small managed surface, a guard that runs the
+              candidate before it is served, an atomic write that is verified on disk, and a snapshot that
+              makes the change reversible. The part it deliberately does not do — load balancing, DNS,
+              proxy health enforcement — is stated rather than implied. On a real file, the same
+              machinery found two defects that had survived months of review, which is the argument for
+              the design.
+            </p>
+          </div>
+
+          <div class="byline" id="authors">
+            <p><strong>Author</strong> — <a href="https://github.com/OdigieDavidIdemudia">David Idemudia Odige</a></p>
+            <p>
+              Reviewed 2 November 2026 against the repository at <code class="mono">6e2ad12</code>.
+              Product repository is private; file paths are cited as evidence, not linked.
+            </p>
+            <p class="muted">
+              Publication content: architecture and method only. No live credentials, internal addresses,
+              customer hostnames, or organisation data.
+            </p>
+          </div>
+
+          <a class="top-link" href="#top">↑ Back to top</a>
+        </section>
+
+      </article>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap foot-inner">
+    <p>PACMAN publication · Documentation, not a sales page.</p>
+    <div class="foot-links">
+      <a href="https://github.com/OdigieDavidIdemudia">GitHub</a>
+      <a href="#top">Top</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var button = document.getElementById('theme-toggle');
+  if (!button) return;
+
+  function render() {
+    var dark = root.getAttribute('data-theme') === 'dark';
+    button.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    button.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    button.querySelector('.glyph').textContent = dark ? '☀' : '☾';
+    button.querySelector('.label').textContent = dark ? 'Light' : 'Dark';
+  }
+
+  button.addEventListener('click', function () {
+    var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('pacman-publication-theme', next); } catch (e) {}
+    render();
+  });
+
+  render();
+})();
+</script>
+</body>
+</html>
