@@ -1192,7 +1192,7 @@ if (host === "teams.example.com")
 if (host === "portal.example.com")
   return "PROXY 192.0.2.10:8080";
 if (host === "intranet.example.com")
-  return "PROXY 192.0.2.10:8080; PROXY 192.0.2.11:8080; DIRECT";
+  return "PROXY 192.0.2.10:8080; DIRECT";
 return FPProxy();          // base file, untouched
 // --- PACMAN_ROUTES_END ---</code></pre>
           </div>
